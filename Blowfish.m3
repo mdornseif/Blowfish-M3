@@ -3,28 +3,45 @@ MODULE Blowfish;
 (* Blowfish by drt@ailis.de					  *)
 (*             (K) 1999 all rights reversed                       *)
 
-(* $Id: Blowfish.m3,v 1.1 2000/04/11 08:34:48 drt Exp $ *)
+(* $Id: Blowfish.m3,v 1.1.1.2 2000/04/11 09:28:26 drt Exp $ *)
 
 (* This implements the basic Blowfish algorythm by Bruce Schneier *)
 (* For further details see http://www.counterpane.com/blowfish/   *)
 
 (* $Log: Blowfish.m3,v $
- * Revision 1.1  2000/04/11 08:34:48  drt
- * Initial revision
+ * Revision 1.1.1.2  2000/04/11 09:28:26  drt
+ * Version with chaining
  *
+(* Revision 1.1.1.1  1999/12/14 14:58:47  drt
+(* initial revision
+(*
+(* Revision 1.2  1999/07/22 06:51:52  drt
+(* Now objectoriented
+(*
  * Revision 1.1  1999/07/12 09:07:15  drt
  * Initial revision
  * *)
 
 IMPORT Word;
-IMPORT Text, IO;
+IMPORT Text, IO, Fmt;
 
 TYPE sbox = ARRAY [0..255] OF Word.T;
-     
-CONST 
-  N =              16;
 
-VAR  
+REVEAL T = Public BRANDED "Blowfish $Revision: 1.1.1.2 $" 
+ OBJECT
+  P : ARRAY [0..17] OF Word.T;
+  S : ARRAY [0..3] OF sbox;
+METHODS
+  F( x : Word.T) : Word.T;
+OVERRIDES
+  init := Init;
+  encipher := Encipher;
+  decipher := Decipher;
+END;    
+
+CONST 
+  rcsid = "$Id: Blowfish.m3,v 1.1.1.2 2000/04/11 09:28:26 drt Exp $";  
+  N = 16;
   
   (* The subkeys are calculated using the Blowfish algorithm.  The          *)
   (* exact method is as follows:                                            *)
@@ -39,14 +56,14 @@ VAR
   (*                  P4 = 0x03707344                                       *)
   
   
-  P := ARRAY [0..17] OF Word.T {
+  Pstart = ARRAY [0..17] OF Word.T {
   16_243f6a88, 16_85a308d3, 16_13198a2e, 16_03707344,
   16_a4093822, 16_299f31d0, 16_082efa98, 16_ec4e6c89,
   16_452821e6, 16_38d01377, 16_be5466cf, 16_34e90c6c,
   16_c0ac29b7, 16_c97c50dd, 16_3f84d5b5, 16_b5470917,
   16_9216d5d9, 16_8979fb1b};
 
-  S  := ARRAY [0..3] OF sbox {
+  Sstart = ARRAY [0..3] OF sbox {
   sbox{16_d1310ba6, 16_98dfb5ac, 16_2ffd72db, 16_d01adfb7, 
        16_b8e1afed, 16_6a267e96, 16_ba7c9045, 16_f12c7f99, 
        16_24a19947, 16_b3916cf7, 16_0801f2e2, 16_858efc16, 
@@ -306,12 +323,15 @@ VAR
 
 (* Initialize Blowfish *)
 
-PROCEDURE Init( key : TEXT) =
+PROCEDURE Init( self : T; key : TEXT ) : T =
 
   VAR
-    i, j, k, data, datal, datar : Word.T;
-    
+    i, j, k, data, datal, datar: Word.T;
+
   BEGIN
+
+    self.P := Pstart;
+    self.S := Sstart;
     
     (*      2.  XOR P1 with the first 32 bits of the key, XOR P2 with the  *)
     (*      second 32-bits of the key, and so on for all bits of the key   *)
@@ -323,7 +343,7 @@ PROCEDURE Init( key : TEXT) =
 									  
 									  
     j :=  0;                                                     
-    FOR i := FIRST(P) TO LAST(P) DO                                       
+    FOR i := FIRST(self.P) TO LAST(self.P) DO                     
       data := 0;                                                             
       FOR k := 1 TO 4 DO
         data := Word.Shift(data, 8) + ORD(Text.GetChar(key, j)); 
@@ -332,7 +352,7 @@ PROCEDURE Init( key : TEXT) =
           j := 0;
         END;
       END;
-      P[i] :=  Word.Xor(P[i], data);
+      self.P[i] :=  Word.Xor(self.P[i], data);
     END;
   
     (*      3.  Encrypt the all-zero string with the Blowfish algorithm,  *)
@@ -345,11 +365,11 @@ PROCEDURE Init( key : TEXT) =
     datal := 0;
     datar := 0;
     
-    FOR i := FIRST(P) TO LAST(P) BY 2 DO
-      Encipher(datal, datar);
+    FOR i := FIRST(self.P) TO LAST(self.P) BY 2 DO
+      self.encipher( datal, datar );
       
-      P[i] := datal;
-      P[i+1] := datar;
+      self.P[i] := datal;
+      self.P[i+1] := datar;
     END;
 
 
@@ -359,20 +379,23 @@ PROCEDURE Init( key : TEXT) =
 
     FOR i:= 0 TO 3 DO
       FOR j := FIRST(sbox) TO LAST(sbox) BY 2 DO
-        Encipher(datal, datar);
+         self.encipher( datal, datar );
         
-        S[i][j] := datal;
-        S[i][j + 1] := datar;
+        self.S[i][j] := datal;
+        self.S[i][j + 1] := datar;
       END;
     END;
     
     (* In total, 521 iterations are required to generate all required     *)
     (* subkeys.  Applications can store the subkeys rather than execute   *)
     (* this derivation process multiple times.                            *)
+    
+    RETURN self;
+
   END Init;
 
   
-PROCEDURE Encipher( VAR Xl, Xr : Word.T) =
+PROCEDURE Encipher( self: T; VAR Xl, Xr: Word.T ) =
   
   VAR
     temp, i : Word.T;
@@ -383,8 +406,8 @@ PROCEDURE Encipher( VAR Xl, Xr : Word.T) =
     xr := Xr;
 
     FOR i := 0 TO N-1 DO    
-      xl := Word.Xor(xl, P[i]);
-      xr := Word.Xor(F(xl), xr);
+      xl := Word.Xor(xl, self.P[i]);
+      xr := Word.Xor(F(self, xl), xr);
       
       (* exchange xl and xr *)
       temp := xl;
@@ -398,15 +421,15 @@ PROCEDURE Encipher( VAR Xl, Xr : Word.T) =
     xl := xr;
     xr := temp;
     
-    xr :=  Word.Xor(xr, P[16]);
-    xl :=  Word.Xor(xl, P[17]);
+    xr :=  Word.Xor(xr, self.P[16]);
+    xl :=  Word.Xor(xl, self.P[17]);
 
     Xl := xl;
     Xr := xr;
-
+    
   END Encipher;
 
-PROCEDURE Decipher( VAR Xl, Xr : Word.T ) =
+PROCEDURE Decipher( self: T; VAR Xl, Xr: Word.T ) =
   
   VAR
     temp, i : Word.T;
@@ -417,8 +440,8 @@ PROCEDURE Decipher( VAR Xl, Xr : Word.T ) =
     xr := Xr;
     
     FOR i := N+1 TO 2 BY -1 DO 
-      xl := Word.Xor(xl, P[i]);
-      xr := Word.Xor(F(xl), xr);
+      xl := Word.Xor(xl, self.P[i]);
+      xr := Word.Xor(F(self, xl), xr);
 
       (* exchange xl and xr *)
       temp := xl;
@@ -432,15 +455,15 @@ PROCEDURE Decipher( VAR Xl, Xr : Word.T ) =
     xl := xr;
     xr := temp;
             
-    xr :=  Word.Xor(xr, P[1]);
-    xl :=  Word.Xor(xl, P[0]);
+    xr :=  Word.Xor(xr, self.P[1]);
+    xl :=  Word.Xor(xl, self.P[0]);
 
     Xl := xl;
     Xr := xr;
-    
+
   END Decipher;
 
-PROCEDURE F( x : Word.T) :  Word.T =
+PROCEDURE F( self: T; x : Word.T) :  Word.T =
   
   VAR
     a, b, c, d :  Word.T;
@@ -453,8 +476,8 @@ PROCEDURE F( x : Word.T) :  Word.T =
     b :=  Word.Shift(Word.And(x, 16_ff0000),-16);
     a :=  Word.Shift(Word.And(x, 16_ff000000),-24);
 
-    y := S[0][a] + S[1][b];
-    y := Word.Xor(y, S[2][c]) + S[3][d];
+    y := self.S[0][a] + self.S[1][b];
+    y := Word.Xor(y, self.S[2][c]) + self.S[3][d];
     
     RETURN y;
 
